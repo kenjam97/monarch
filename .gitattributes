@@ -1,0 +1,2 @@
+# Keep the bundled third-party renderer out of GitHub's language breakdown.
+public/study-film/three.module.js linguist-vendored
