@@ -1,0 +1,30 @@
+import { afterAll,beforeAll,describe,it,expect } from 'vitest';
+import { mkdtempSync,rmSync } from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { request, type Server } from 'node:http';
+import { Store } from '../server/store';
+import { Importer } from '../server/importer';
+import { makeApp } from '../server/app';
+import { river } from './fixtures';
+let store:Store,server:Server,url:string,dir:string;
+beforeAll(async()=>{dir=mkdtempSync(path.join(os.tmpdir(),'monarch-api-'));store=new Store(dir);const app=makeApp(store,new Importer(store),4318);server=await new Promise<Server>(resolve=>{const s=app.listen(0,'127.0.0.1',()=>resolve(s));});url='http://127.0.0.1:'+(server.address() as any).port;});
+afterAll(async()=>{await new Promise<void>(resolve=>server.close(()=>resolve()));store.close();rmSync(dir,{recursive:true,force:true});});
+const post=(route:string,body:unknown)=>fetch(url+'/api'+route,{method:'POST',headers:{'Content-Type':'application/json','x-monarch':'1'},body:JSON.stringify(body)});
+describe('local HTTP workflow',()=>{
+ it('starts empty with no invented statistics',async()=>{const s=await(await fetch(url+'/api/summary')).json();expect(s.total.hands).toBe(0);expect(s.total.vpip).toBe(0);expect(s.level).toBe(1);});
+ it('rejects cross-origin writes and host spoofing',async()=>{expect((await fetch(url+'/api/settings',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'})).status).toBe(403);const status=await new Promise<number>(resolve=>{const req=request(url+'/api/summary',{headers:{host:'attacker.invalid'}},res=>{res.resume();resolve(res.statusCode!);});req.end();});expect(status).toBe(403);expect((await fetch(url+'/api/ranges/reset',{method:'POST',headers:{'x-monarch':'1',origin:'https://attacker.invalid'}})).status).toBe(403);});
+ it('imports multipart TXT and deduplicates through the real endpoint',async()=>{for(let i=0;i<2;i++){const form=new FormData();form.append('files',new Blob([river]),'cash.txt');const res=await fetch(url+'/api/import',{method:'POST',headers:{'x-monarch':'1'},body:form});expect(res.status).toBe(200);const reports=await res.json();expect(reports[0].newHands).toBe(i?0:1);expect(reports[0].duplicates).toBe(i?1:0);}expect((await(await fetch(url+'/api/summary')).json()).total.hands).toBe(1);});
+ it('saves a review once without awarding duplicate XP',async()=>{const rs=await(await fetch(url+'/api/reviews')).json(),r=rs.find((r:any)=>r.category==='river');expect(r).toBeTruthy();for(let i=0;i<2;i++){const a=await(await post('/reviews/'+encodeURIComponent(r.id)+'/complete',{answer:'fold',note:'Insufficient credible bluffs.'})).json();expect(a.xp).toBe(i?0:20);}expect((await(await fetch(url+'/api/summary')).json()).reviewed).toBe(1);});
+ it('grades a training challenge idempotently against a range snapshot',async()=>{const c=await(await post('/training/challenge',{type:'ranges',position:'HJ',context:'unopened'})).json(),expected=store.ranges()['HJ:unopened'][c.hand];await post('/ranges',{position:'HJ',context:'unopened',cell:c.hand,action:expected==='open'?'fold':'open'});for(let i=0;i<2;i++){const result=await(await post('/training/answer',{id:c.id,answer:expected})).json();expect(result.correct).toBe(true);}expect(store.db.prepare('SELECT COUNT(*) n FROM training_attempts').get()!.n).toBe(1);});
+ it('stores hand notes and opponent aliases',async()=>{expect((await post('/hands/TEST-RIVER-001/note',{note:'Review river sizing.',tag:'curiosity call'})).status).toBe(200);const opps=await(await fetch(url+'/api/opponents')).json();expect(opps).toHaveLength(5);const p=opps.find((p:any)=>p.name==='Player6');expect(p.archetype.name).toBe('Unknown');expect((await post('/opponents/note',{id:p.id,note:'One observed showdown.',alias:'Player6-alias'})).status).toBe(200);const saved=await(await fetch(url+'/api/hands/TEST-RIVER-001')).json();expect(saved.note.tag).toBe('curiosity call');});
+ it('serves frequency data and exact card drill-down through HTTP',async()=>{
+  const result=await fetch(url+'/api/frequencies');expect(result.status).toBe(200);
+  const data=await result.json();expect(data.known).toBe(1);
+  expect(data.starting.find((c:any)=>c.hand==='AQo').count).toBe(1);
+  expect((await(await fetch(url+'/api/hands?card=Qs&source=flop')).json()).total).toBe(1);
+  expect((await(await fetch(url+'/api/hands?card=Qs&source=river')).json()).total).toBe(0);
+  expect((await(await fetch(url+'/api/frequencies?position=SB')).json()).known).toBe(0);
+ });
+ it('exports original text and handles missing hands',async()=>{expect(await(await fetch(url+'/api/export')).text()).toContain('Poker Hand #TEST-RIVER-001');expect((await fetch(url+'/api/hands/not-a-hand')).status).toBe(404);});
+});

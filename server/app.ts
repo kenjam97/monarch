@@ -1,0 +1,48 @@
+import express from 'express';
+import multer from 'multer';
+import { randomUUID } from 'node:crypto';
+import { mkdir,stat } from 'node:fs/promises';
+import path from 'node:path';
+import { Store } from './store';
+import { Importer,MAX_BYTES } from './importer';
+import { parseHand } from '../src/import/gg';
+import { SAMPLE_HAND } from '../src/import/sample';
+import { CONTEXTS,RANGE_ACTIONS,defaultRanges,gridClass,rangeKey } from '../src/poker/ranges';
+import { POSITIONS } from '../src/poker/types';
+import { makeChallenge,gradeChallenge,type Challenge } from '../src/training/training';
+export function makeApp(store:Store,importer:Importer,port:number) {
+  const app=express();app.disable('x-powered-by');app.use((req,res,next)=>{
+    const host=req.headers.host?.split(':')[0];if(!['127.0.0.1','localhost'].includes(host??''))return res.status(403).json({error:'Local access only.'});
+    if(req.method!=='GET'&&req.method!=='HEAD'&&req.headers['x-monarch']!=='1')return res.status(403).json({error:'Missing local application header.'});
+    const origin=req.headers.origin;if(origin&&!['http://127.0.0.1:'+port,'http://localhost:'+port].includes(origin))return res.status(403).json({error:'Origin not allowed.'});
+    res.setHeader('X-Content-Type-Options','nosniff');res.setHeader('Referrer-Policy','no-referrer');
+    res.setHeader('X-Frame-Options','DENY');next();
+  });app.use(express.json({limit:'2mb'}));
+  app.get('/api/health',(_req,res)=>res.json({application:'monarch',version:'1.0.0',ready:true}));
+  app.get('/api/summary',(req,res)=>res.json(store.summary(req.query)));
+  app.get('/api/frequencies',(req,res)=>res.json(store.frequencies(req.query)));
+  app.get('/api/hands',(req,res)=>res.json(store.listHands(req.query)));
+  app.get('/api/sample',(_req,res)=>res.json(parseHand(SAMPLE_HAND)));
+  app.get('/api/hands/:id',(req,res)=>{const hand=store.getHand(req.params.id);if(!hand)return res.status(404).json({error:'Hand not found.'});res.json({hand,note:store.db.prepare('SELECT * FROM hand_notes WHERE hand_id=?').get(hand.id)??{note:'',tag:''}});});
+  app.post('/api/hands/:id/note',(req,res)=>{if(!store.getHand(req.params.id))return res.status(404).json({error:'Hand not found.'});const note=String(req.body.note??'').slice(0,10000),tag=String(req.body.tag??'').slice(0,100);store.db.prepare('INSERT INTO hand_notes VALUES(?,?,?) ON CONFLICT(hand_id) DO UPDATE SET note=excluded.note,tag=excluded.tag').run(req.params.id,note,tag);res.json({ok:true});});
+  app.get('/api/reviews',(req,res)=>{const done=req.query.done==='1',category=String(req.query.category??''),where=`reviewed_at IS ${done?'NOT ':''}NULL${category?' AND category=?':''}`,params=category?[category]:[];res.json(store.db.prepare(`SELECT r.*,h.position,h.hand_class,h.date FROM reviews r JOIN hands h ON h.id=r.hand_id WHERE ${where} ORDER BY priority DESC LIMIT 200`).all(...params).map(r=>({...r,...JSON.parse(r.json as string)})));});
+  app.post('/api/reviews/:id/complete',(req,res)=>{const row=store.db.prepare('SELECT * FROM reviews WHERE id=?').get(req.params.id);if(!row)return res.status(404).json({error:'Review not found.'});if(!['fold','check','call','raise','bet'].includes(req.body.answer))return res.status(400).json({error:'Choose a decision first.'});store.db.prepare('UPDATE reviews SET reviewed_at=COALESCE(reviewed_at,?),answer=?,note=? WHERE id=?').run(new Date().toISOString(),req.body.answer,String(req.body.note??'').slice(0,10000),req.params.id);res.json({ok:true,xp:row.reviewed_at?0:20});});
+  app.get('/api/ranges',(_req,res)=>res.json(store.ranges()));
+  app.post('/api/ranges',(req,res)=>{const {position,context,cell,action}=req.body;if(!POSITIONS.includes(position)||!CONTEXTS.includes(context)||!RANGE_ACTIONS.includes(action)||!Array.from({length:169},(_,i)=>gridClass(Math.floor(i/13),i%13)).includes(cell))return res.status(400).json({error:'Invalid range cell.'});store.setRanges({[rangeKey(position,context)]:{[cell]:action}});store.regenerate();res.json(store.ranges());});
+  app.post('/api/ranges/reset',(_req,res)=>{store.setRanges(defaultRanges());store.regenerate();res.json(store.ranges());});
+  app.get('/api/opponents',(_req,res)=>res.json(store.opponents()));
+  app.post('/api/opponents/note',(req,res)=>{const {id}=req.body;if(!store.db.prepare('SELECT 1 FROM players WHERE id=?').get(String(id)))return res.status(404).json({error:'Opponent not found.'});store.db.prepare('UPDATE players SET note=?,alias=? WHERE id=?').run(String(req.body.note??'').slice(0,10000),String(req.body.alias??'').slice(0,100),id);res.json({ok:true});});
+  app.post('/api/training/challenge',(req,res)=>{const{type,position,context}=req.body;if(!['draws','odds','ranges'].includes(type)||(position&&!POSITIONS.includes(position))||(context&&!CONTEXTS.includes(context)))return res.status(400).json({error:'Invalid drill.'});const ranges=store.ranges(),c={...makeChallenge(type,ranges,position,context),id:randomUUID()};store.db.prepare('INSERT INTO challenges VALUES(?,?,?,?)').run(c.id,JSON.stringify(c),JSON.stringify(c.type==='ranges'?{[rangeKey(c.position!,c.context!)]:{[c.hand!]:ranges[rangeKey(c.position!,c.context!)][c.hand!]}}:{}),new Date().toISOString());res.json(c);});
+  app.post('/api/training/answer',(req,res)=>{const row=store.db.prepare('SELECT * FROM challenges WHERE id=?').get(String(req.body.id));if(!row)return res.status(404).json({error:'Drill expired.'});const previous=store.db.prepare('SELECT json FROM training_attempts WHERE id=?').get(row.id);if(previous)return res.json(JSON.parse(previous.json as string));const c:Challenge=JSON.parse(row.json as string),answer=gradeChallenge(c,req.body.answer,JSON.parse(row.range_snapshot as string));store.db.prepare('INSERT INTO training_attempts VALUES(?,?,?,?,?,?)').run(c.id,c.type,+answer.correct,answer.xp,new Date().toISOString(),JSON.stringify(answer));res.json(answer);});
+  const upload=multer({storage:multer.memoryStorage(),limits:{fileSize:MAX_BYTES,files:30}});
+  app.post('/api/import',upload.array('files',30),async(req,res)=>{const files=req.files as Express.Multer.File[];if(!files?.length)return res.status(400).json({error:'Choose TXT or ZIP histories.'});const reports=[];for(const file of files)reports.push(await importer.ingest(file.originalname,file.buffer));res.json(reports);});
+  app.post('/api/import/scan',async(req,res)=>{const directory=req.body.directory?path.resolve(String(req.body.directory)):undefined;if(directory&&!(await stat(directory)).isDirectory())throw new Error('Select a directory.');res.json(await importer.scan(directory));});
+  app.get('/api/imports',(_req,res)=>res.json(store.db.prepare('SELECT * FROM imports ORDER BY created_at DESC LIMIT 50').all()));
+  app.get('/api/imports/:id/issues',(req,res)=>res.json(store.db.prepare('SELECT * FROM import_issues WHERE import_id=?').all(req.params.id)));
+  app.get('/api/settings',(_req,res)=>res.json({name:store.setting('name','Player'),inbox:importer.inbox,archive:importer.archive,database:path.join(store.directory,'monarch.sqlite'),watchEnabled:store.setting('watchEnabled',true),openSize:store.setting('openSize',2.5),isolationSize:store.setting('isolationSize',4),extraLimper:store.setting('extraLimper',1),status:importer.status}));
+  app.post('/api/settings',async(req,res)=>{const {name,inbox,watchEnabled,openSize,isolationSize,extraLimper}=req.body;for(const n of [openSize,isolationSize,extraLimper])if(!Number.isFinite(Number(n))||Number(n)<0||Number(n)>20)throw new Error('Bet-size settings must be between 0 and 20 BB.');if(Number(openSize)<2||Number(isolationSize)<2)throw new Error('Opening and isolation raises must be at least 2 BB.');if(inbox){if(!path.isAbsolute(inbox))throw new Error('Inbox requires an absolute folder path.');await mkdir(inbox,{recursive:true});store.setSetting('inbox',path.resolve(inbox));}store.setSetting('name',String(name??'Player').trim().slice(0,40)||'Player');store.setSetting('watchEnabled',!!watchEnabled);store.setSetting('openSize',Number(openSize));store.setSetting('isolationSize',Number(isolationSize));store.setSetting('extraLimper',Number(extraLimper));res.json({ok:true});});
+  app.post('/api/regenerate',(_req,res)=>{store.regenerate();res.json({ok:true});});
+  app.get('/api/export',(_req,res)=>{res.setHeader('Content-Disposition','attachment; filename="monarch-histories.txt"');res.type('text/plain');for(const row of store.db.prepare('SELECT raw FROM hands ORDER BY date').iterate())res.write(row.raw+'\n\n');res.end();});
+  app.use('/api',(_req,res)=>res.status(404).json({error:'Unknown endpoint.'}));
+  app.use((err:any,_req:express.Request,res:express.Response,_next:express.NextFunction)=>{console.error(err.message);res.status(400).json({error:err.message??'Request failed.'});});return app;
+}

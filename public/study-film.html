@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="theme-color" content="#151419"><title>Monarch · A hand</title><link rel="preload" href="/study-film/caslon-display.ttf" as="font" type="font/ttf" crossorigin><link rel="stylesheet" href="/study-film/film.css"></head>
+<body data-shot="loading">
+<main id="film" aria-label="Monarch study sequence">
+  <div id="picture" aria-label="Poker table"><canvas id="table-canvas" aria-hidden="true"></canvas><div class="vignette" aria-hidden="true"></div><div class="frame-line" aria-hidden="true"></div></div>
+  <header class="chrome"><a href="/" class="signature" aria-label="Return to Monarch">Monarch</a><button id="menu-open" aria-haspopup="dialog">Menu <span aria-hidden="true">≡</span></button></header>
+  <div id="loading" role="status"><span>Monarch</span><p>Preparing the hand.</p></div>
+  <section id="opening" aria-label="Opening"><p>Poker study</p><h1>Monarch<span aria-hidden="true">.</span></h1><div class="opening-foot"><span>A hand at the button.</span><span>As / Qd</span></div></section>
+  <div class="scene-copy" id="scene-copy"><p id="street-label">Before the flop</p><h2 id="action-copy">You raise.<br>The big blind calls.</h2><p id="action-detail">2.5 BB each.</p></div>
+  <div class="table-label" id="pot"><span>In the pot</span><b>5.5 <small>BB</small></b></div>
+  <div class="table-label seat-label" id="opponent-label"><span>Big blind</span><b>97.5 <small>BB</small></b></div>
+  <div class="table-label seat-label" id="hero-label"><span>You, button</span><b>97.5 <small>BB</small></b></div>
+  <div id="split-caption" aria-hidden="true"><span>The flop.</span><span>Q♠ &nbsp; 8♥ &nbsp; 4♠</span></div>
+  <section id="decision" aria-labelledby="decision-title" hidden>
+    <p class="hand-context">Practice hand</p><h1 id="decision-title">Your move.</h1>
+    <p id="decision-context">The big blind bets 18 BB.</p>
+    <div class="price"><span id="price-number">18</span><div><span id="price-unit">BB to call</span><small id="price-detail">43.5 BB in the pot</small></div></div>
+    <p class="equity" id="equity">The call needs 29.3% equity.</p>
+    <div class="decision-choices" id="choices" role="group" aria-label="Choose an action"><button data-choice="fold">Fold<span aria-hidden="true">↗</span></button><button data-choice="call">Call<span aria-hidden="true">↗</span></button><button data-choice="raise">Raise<span aria-hidden="true">↗</span></button></div>
+    <div id="answer" hidden><p id="answer-text" role="status"></p><button id="change-answer" class="quiet">Change my answer</button></div>
+    <div id="result" hidden><p id="result-copy"></p><button id="again" class="underlined">Replay this hand <span aria-hidden="true">↺</span></button></div>
+    <button id="evidence" class="evidence">Read the action so far <span aria-hidden="true">↗</span></button>
+    <p class="sample-note">Synthetic teaching hand. No study records are changed.</p>
+  </section>
+  <footer class="transport" id="transport"><div class="transport-top"><span class="practice-caption">Practice hand <span class="stakes">· $0.01 / $0.02</span></span><button id="play" aria-label="Pause sequence">Pause <span aria-hidden="true">Ⅱ</span></button></div><div class="scrubber"><label for="timeline" class="sr-only">Sequence position</label><input id="timeline" type="range" min="0" max="20500" step="100" value="0"><span class="track" aria-hidden="true"><i id="elapsed-line"></i></span></div><nav aria-label="Streets"><button data-seek="2700">Before the flop</button><button data-seek="6800">Flop</button><button data-seek="12300">Turn</button><button data-seek="20500">River</button></nav></footer>
+  <p class="sr-only" id="accessible-state" aria-live="polite"></p>
+  <div id="renderer-error" hidden><h1>The table could not open.</h1><p id="renderer-error-text"></p><a href="/">Return to Monarch</a></div>
+</main>
+<dialog id="menu" aria-label="Sequence menu"><button class="close" id="menu-close" aria-label="Close menu">Close <span aria-hidden="true">×</span></button><span class="menu-mark">Monarch</span><div class="menu-content"><p>This hand</p><button data-menu="resume">Continue</button><button data-menu="restart">From the beginning</button><button data-menu="decision">The river decision</button><button data-menu="history">Read the hand</button><a href="/">Return to the app <span aria-hidden="true">↗</span></a><label class="motion-choice"><input type="checkbox" id="motion-choice" checked>Camera motion</label><small>Space pauses. Escape closes the menu.</small></div><span class="menu-card" aria-hidden="true">a/q</span></dialog>
+<dialog id="history" aria-labelledby="history-title"><button class="close" id="history-close" aria-label="Close hand history">Close <span aria-hidden="true">×</span></button><div class="history-content"><p>Practice hand · As Qd</p><h1 id="history-title">The hand so far.</h1><p id="history-limit">Later actions are hidden.</p><ol id="history-actions"></ol></div></dialog>
+<script type="module" src="/study-film/film.js"></script>
+</body></html>

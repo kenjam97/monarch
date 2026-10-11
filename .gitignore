@@ -1,0 +1,14 @@
+node_modules/
+dist/
+data/
+.npm-cache/
+.env
+.env.*
+!.env.example
+*.log
+*.sqlite
+*.sqlite-*
+*.db
+coverage/
+screenshots/*
+!screenshots/study-current.png
